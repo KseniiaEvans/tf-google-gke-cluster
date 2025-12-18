@@ -1,29 +1,40 @@
-# Configure the Google Cloud provider
+###############################################################################
+# Providers
+###############################################################################
+
 provider "google" {
-  # The GCP project to use
   project = var.GOOGLE_PROJECT
-  # The GCP region to deploy resources in
-  region  = var.GOOGLE_REGION
+
+  # NOTE:
+  # This expects a *region* (e.g. europe-central2).
+  # In this module we also use GOOGLE_REGION as GKE "location" (region OR zone).
+  # For a cleaner design, split into GOOGLE_REGION (region) + GKE_LOCATION (region/zone).
+  region = var.GOOGLE_REGION
 }
 
-# Create the GKE (Google Kubernetes Engine) cluster
+###############################################################################
+# GKE Cluster
+###############################################################################
+
 resource "google_container_cluster" "this" {
-  # Name of the cluster
   name     = var.GKE_CLUSTER_NAME
-  # Location (region) for the cluster
+
+  # GKE location can be either region (regional cluster) or zone (zonal cluster),
+  # e.g. "europe-central2" or "europe-central2-a"
   location = var.GOOGLE_REGION
 
-  # Set initial node count (required, but will remove default pool)
+  # Enable/disable deletion protection via variable
+  deletion_protection = var.DELETION_PROTECTION
+
+  # Required field. We remove the default node pool and create our own node pool below.
   initial_node_count       = 1
-  # Remove default node pool to use custom node pools instead
   remove_default_node_pool = true
 
-  # Workload Identity configuration for GKE
   workload_identity_config {
     workload_pool = "${var.GOOGLE_PROJECT}.svc.id.goog"
   }
 
-  # Node configuration for metadata
+  # Minimal node_config block (required for workload_metadata_config)
   node_config {
     workload_metadata_config {
       mode = "GKE_METADATA"
@@ -31,47 +42,45 @@ resource "google_container_cluster" "this" {
   }
 }
 
-# Create a custom node pool for the GKE cluster
+###############################################################################
+# Node Pool
+###############################################################################
+
 resource "google_container_node_pool" "this" {
-  # Name of the node pool
-  name       = var.GKE_POOL_NAME
-  # GCP project to use (derived from the cluster)
-  project    = google_container_cluster.this.project
-  # Attach node pool to the created cluster
-  cluster    = google_container_cluster.this.name
-  # Location (region)
-  location   = google_container_cluster.this.location
-  # Number of nodes in the pool
+  name     = var.GKE_POOL_NAME
+  project  = var.GOOGLE_PROJECT
+  cluster  = google_container_cluster.this.name
+  location = google_container_cluster.this.location
+
   node_count = var.GKE_NUM_NODES
 
-  # Node configuration
   node_config {
-    # Machine type for the nodes
     machine_type = var.GKE_MACHINE_TYPE
   }
 }
 
-# Module to authenticate with GKE cluster using native Terraform module
+###############################################################################
+# Auth helper module (kubectl access)
+###############################################################################
+
 module "gke_auth" {
-  depends_on = [
-    google_container_cluster.this
-  ]
-  # Source of the module (Terraform Registry)
-  source       = "terraform-google-modules/kubernetes-engine/google//modules/auth"
-  version      = ">= 24.0.0"
-  # Project and cluster details for authentication
+  depends_on = [google_container_cluster.this]
+
+  source  = "terraform-google-modules/kubernetes-engine/google//modules/auth"
+  version = ">= 24.0.0"
+
   project_id   = var.GOOGLE_PROJECT
   cluster_name = google_container_cluster.this.name
-  location     = var.GOOGLE_REGION
+  location     = google_container_cluster.this.location
 }
 
-# Data source to retrieve the current Google client configuration
+###############################################################################
+# Data sources
+###############################################################################
+
 data "google_client_config" "current" {}
 
-# Data source to fetch details about the created GKE cluster
 data "google_container_cluster" "main" {
-  # Name of the cluster
   name     = google_container_cluster.this.name
-  # Location (region)
-  location = var.GOOGLE_REGION
+  location = google_container_cluster.this.location
 }
