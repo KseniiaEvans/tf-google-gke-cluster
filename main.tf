@@ -17,7 +17,7 @@ provider "google" {
 ###############################################################################
 
 resource "google_container_cluster" "this" {
-  name     = var.GKE_CLUSTER_NAME
+  name = var.GKE_CLUSTER_NAME
 
   # GKE location can be either region (regional cluster) or zone (zonal cluster),
   # e.g. "europe-central2" or "europe-central2-a"
